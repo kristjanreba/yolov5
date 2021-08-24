@@ -1,4 +1,7 @@
-# YOLOv5 dataset utils and dataloaders
+# YOLOv5 🚀 by Ultralytics, GPL-3.0 license
+"""
+Dataloaders and dataset utils
+"""
 
 import glob
 import hashlib
@@ -152,7 +155,7 @@ class _RepeatSampler(object):
 
 
 class LoadImages:  # for inference
-    def __init__(self, path, img_size=640, stride=32):
+    def __init__(self, path, img_size=640, stride=32, auto=True):
         p = str(Path(path).absolute())  # os-agnostic absolute path
         if '*' in p:
             files = sorted(glob.glob(p, recursive=True))  # glob
@@ -173,6 +176,7 @@ class LoadImages:  # for inference
         self.nf = ni + nv  # number of files
         self.video_flag = [False] * ni + [True] * nv
         self.mode = 'image'
+        self.auto = auto
         if any(videos):
             self.new_video(videos[0])  # new video
         else:
@@ -214,7 +218,7 @@ class LoadImages:  # for inference
             print(f'image {self.count}/{self.nf} {path}: ', end='')
 
         # Padded resize
-        img = letterbox(img0, self.img_size, stride=self.stride)[0]
+        img = letterbox(img0, self.img_size, stride=self.stride, auto=self.auto)[0]
 
         # Convert
         img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
@@ -273,7 +277,7 @@ class LoadWebcam:  # for inference
 
 
 class LoadStreams:  # multiple IP or RTSP cameras
-    def __init__(self, sources='streams.txt', img_size=640, stride=32):
+    def __init__(self, sources='streams.txt', img_size=640, stride=32, auto=True):
         self.mode = 'stream'
         self.img_size = img_size
         self.stride = stride
@@ -287,6 +291,7 @@ class LoadStreams:  # multiple IP or RTSP cameras
         n = len(sources)
         self.imgs, self.fps, self.frames, self.threads = [None] * n, [0] * n, [0] * n, [None] * n
         self.sources = [clean_str(x) for x in sources]  # clean source names for later
+        self.auto = auto
         for i, s in enumerate(sources):  # index, source
             # Start thread to read frames from video stream
             print(f'{i + 1}/{n}: {s}... ', end='')
@@ -309,7 +314,7 @@ class LoadStreams:  # multiple IP or RTSP cameras
         print('')  # newline
 
         # check for common shapes
-        s = np.stack([letterbox(x, self.img_size, stride=self.stride)[0].shape for x in self.imgs], 0)  # shapes
+        s = np.stack([letterbox(x, self.img_size, stride=self.stride, auto=self.auto)[0].shape for x in self.imgs], 0)  # shapes
         self.rect = np.unique(s, axis=0).shape[0] == 1  # rect inference if all shapes equal
         if not self.rect:
             print('WARNING: Different stream shapes detected. For optimal performance supply similarly-shaped streams.')
@@ -338,7 +343,7 @@ class LoadStreams:  # multiple IP or RTSP cameras
 
         # Letterbox
         img0 = self.imgs.copy()
-        img = [letterbox(x, self.img_size, auto=self.rect, stride=self.stride)[0] for x in img0]
+        img = [letterbox(x, self.img_size, stride=self.stride, auto=self.rect and self.auto)[0] for x in img0]
 
         # Stack
         img = np.stack(img, 0)
@@ -455,16 +460,25 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(np.int) * stride
 
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
-        self.imgs = [None] * n
+        self.imgs, self.img_npy = [None] * n, [None] * n
         if cache_images:
+            if cache_images == 'disk':
+                self.im_cache_dir = Path(Path(self.img_files[0]).parent.as_posix() + '_npy')
+                self.img_npy = [self.im_cache_dir / Path(f).with_suffix('.npy').name for f in self.img_files]
+                self.im_cache_dir.mkdir(parents=True, exist_ok=True)
             gb = 0  # Gigabytes of cached images
             self.img_hw0, self.img_hw = [None] * n, [None] * n
             results = ThreadPool(NUM_THREADS).imap(lambda x: load_image(*x), zip(repeat(self), range(n)))
             pbar = tqdm(enumerate(results), total=n)
             for i, x in pbar:
-                self.imgs[i], self.img_hw0[i], self.img_hw[i] = x  # img, hw_original, hw_resized = load_image(self, i)
-                gb += self.imgs[i].nbytes
-                pbar.desc = f'{prefix}Caching images ({gb / 1E9:.1f}GB)'
+                if cache_images == 'disk':
+                    if not self.img_npy[i].exists():
+                        np.save(self.img_npy[i].as_posix(), x[0])
+                    gb += self.img_npy[i].stat().st_size
+                else:
+                    self.imgs[i], self.img_hw0[i], self.img_hw[i] = x  # im, hw_orig, hw_resized = load_image(self, i)
+                    gb += self.imgs[i].nbytes
+                pbar.desc = f'{prefix}Caching images ({gb / 1E9:.1f}GB {cache_images})'
             pbar.close()
 
     def cache_labels(self, path=Path('./labels.cache'), prefix=''):
@@ -554,6 +568,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         if self.augment:
             # Albumentations
             img, labels = self.albumentations(img, labels)
+            nl = len(labels) # update after albumentations
 
             # HSV color-space
             augment_hsv(img, hgain=hyp['hsv_h'], sgain=hyp['hsv_s'], vgain=hyp['hsv_v'])
@@ -618,21 +633,25 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
 
 # Ancillary functions --------------------------------------------------------------------------------------------------
-def load_image(self, index):
-    # loads 1 image from dataset, returns img, original hw, resized hw
-    img = self.imgs[index]
-    if img is None:  # not cached
-        path = self.img_files[index]
-        img = cv2.imread(path)  # BGR
-        assert img is not None, 'Image Not Found ' + path
-        h0, w0 = img.shape[:2]  # orig hw
+def load_image(self, i):
+    # loads 1 image from dataset index 'i', returns im, original hw, resized hw
+    im = self.imgs[i]
+    if im is None:  # not cached in ram
+        npy = self.img_npy[i]
+        if npy and npy.exists():  # load npy
+            im = np.load(npy)
+        else:  # read image
+            path = self.img_files[i]
+            im = cv2.imread(path)  # BGR
+            assert im is not None, 'Image Not Found ' + path
+        h0, w0 = im.shape[:2]  # orig hw
         r = self.img_size / max(h0, w0)  # ratio
         if r != 1:  # if sizes are not equal
-            img = cv2.resize(img, (int(w0 * r), int(h0 * r)),
-                             interpolation=cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR)
-        return img, (h0, w0), img.shape[:2]  # img, hw_original, hw_resized
+            im = cv2.resize(im, (int(w0 * r), int(h0 * r)),
+                            interpolation=cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR)
+        return im, (h0, w0), im.shape[:2]  # im, hw_original, hw_resized
     else:
-        return self.imgs[index], self.img_hw0[index], self.img_hw[index]  # img, hw_original, hw_resized
+        return self.imgs[i], self.img_hw0[i], self.img_hw[i]  # im, hw_original, hw_resized
 
 
 def load_mosaic(self, index):
@@ -884,11 +903,11 @@ def verify_image_label(args):
         return [None, None, None, None, nm, nf, ne, nc, msg]
 
 
-def dataset_stats(path='coco128.yaml', autodownload=False, verbose=False):
+def dataset_stats(path='coco128.yaml', autodownload=False, verbose=False, profile=False, hub=False):
     """ Return dataset statistics dictionary with images and instances counts per split per class
-    Usage1: from utils.datasets import *; dataset_stats('coco128.yaml', verbose=True)
-    Usage2: from utils.datasets import *; dataset_stats('../datasets/coco128.zip', verbose=True)
-    
+    To run in parent directory: export PYTHONPATH="$PWD/yolov5"
+    Usage1: from utils.datasets import *; dataset_stats('coco128.yaml', autodownload=True)
+    Usage2: from utils.datasets import *; dataset_stats('../datasets/coco128_with_yaml.zip')
     Arguments
         path:           Path to data.yaml or data.zip (with data.yaml inside data.zip)
         autodownload:   Attempt to download dataset if not found locally
@@ -897,35 +916,42 @@ def dataset_stats(path='coco128.yaml', autodownload=False, verbose=False):
 
     def round_labels(labels):
         # Update labels to integer class and 6 decimal place floats
-        return [[int(c), *[round(x, 6) for x in points]] for c, *points in labels]
+        return [[int(c), *[round(x, 4) for x in points]] for c, *points in labels]
 
     def unzip(path):
         # Unzip data.zip TODO: CONSTRAINT: path/to/abc.zip MUST unzip to 'path/to/abc/'
         if str(path).endswith('.zip'):  # path is data.zip
+            assert Path(path).is_file(), f'Error unzipping {path}, file not found'
             assert os.system(f'unzip -q {path} -d {path.parent}') == 0, f'Error unzipping {path}'
-            data_dir = path.with_suffix('')  # dataset directory
-            return True, data_dir, list(data_dir.rglob('*.yaml'))[0]  # zipped, data_dir, yaml_path
+            dir = path.with_suffix('')  # dataset directory
+            return True, str(dir), next(dir.rglob('*.yaml'))  # zipped, data_dir, yaml_path
         else:  # path is data.yaml
             return False, None, path
 
+    def hub_ops(f, max_dim=1920):
+        # HUB ops for 1 image 'f'
+        im = Image.open(f)
+        r = max_dim / max(im.height, im.width)  # ratio
+        if r < 1.0:  # image too large
+            im = im.resize((int(im.width * r), int(im.height * r)))
+        im.save(im_dir / Path(f).name, quality=75)  # save
+
     zipped, data_dir, yaml_path = unzip(Path(path))
-    with open(check_file(yaml_path)) as f:
+    with open(check_file(yaml_path), errors='ignore') as f:
         data = yaml.safe_load(f)  # data dict
         if zipped:
             data['path'] = data_dir  # TODO: should this be dir.resolve()?
     check_dataset(data, autodownload)  # download dataset if missing
-    nc = data['nc']  # number of classes
-    stats = {'nc': nc, 'names': data['names']}  # statistics dictionary
+    hub_dir = Path(data['path'] + ('-hub' if hub else ''))
+    stats = {'nc': data['nc'], 'names': data['names']}  # statistics dictionary
     for split in 'train', 'val', 'test':
         if data.get(split) is None:
             stats[split] = None  # i.e. no test set
             continue
         x = []
-        dataset = LoadImagesAndLabels(data[split], augment=False, rect=True)  # load dataset
-        if split == 'train':
-            cache_path = Path(dataset.label_files[0]).parent.with_suffix('.cache')  # *.cache path
+        dataset = LoadImagesAndLabels(data[split])  # load dataset
         for label in tqdm(dataset.labels, total=dataset.n, desc='Statistics'):
-            x.append(np.bincount(label[:, 0].astype(int), minlength=nc))
+            x.append(np.bincount(label[:, 0].astype(int), minlength=data['nc']))
         x = np.array(x)  # shape(128x80)
         stats[split] = {'instance_stats': {'total': int(x.sum()), 'per_class': x.sum(0).tolist()},
                         'image_stats': {'total': dataset.n, 'unlabelled': int(np.all(x == 0, 1).sum()),
@@ -933,10 +959,37 @@ def dataset_stats(path='coco128.yaml', autodownload=False, verbose=False):
                         'labels': [{str(Path(k).name): round_labels(v.tolist())} for k, v in
                                    zip(dataset.img_files, dataset.labels)]}
 
+        if hub:
+            im_dir = hub_dir / 'images'
+            im_dir.mkdir(parents=True, exist_ok=True)
+            for _ in tqdm(ThreadPool(NUM_THREADS).imap(hub_ops, dataset.img_files), total=dataset.n, desc='HUB Ops'):
+                pass
+
+    # Profile
+    stats_path = hub_dir / 'stats.json'
+    if profile:
+        for _ in range(1):
+            file = stats_path.with_suffix('.npy')
+            t1 = time.time()
+            np.save(file, stats)
+            t2 = time.time()
+            x = np.load(file, allow_pickle=True)
+            print(f'stats.npy times: {time.time() - t2:.3f}s read, {t2 - t1:.3f}s write')
+
+            file = stats_path.with_suffix('.json')
+            t1 = time.time()
+            with open(file, 'w') as f:
+                json.dump(stats, f)  # save stats *.json
+            t2 = time.time()
+            with open(file, 'r') as f:
+                x = json.load(f)  # load hyps dict
+            print(f'stats.json times: {time.time() - t2:.3f}s read, {t2 - t1:.3f}s write')
+
     # Save, print and return
-    with open(cache_path.with_suffix('.json'), 'w') as f:
-        json.dump(stats, f)  # save stats *.json
+    if hub:
+        print(f'Saving {stats_path.resolve()}...')
+        with open(stats_path, 'w') as f:
+            json.dump(stats, f)  # save stats.json
     if verbose:
         print(json.dumps(stats, indent=2, sort_keys=False))
-        # print(yaml.dump([stats], sort_keys=False, default_flow_style=False))
     return stats
