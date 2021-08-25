@@ -54,7 +54,9 @@ def augment_hsv(im, hgain=0.5, sgain=0.5, vgain=0.5):
         lut_val = np.clip(x * r[2], 0, 255).astype(dtype)
 
         im_hsv = cv2.merge((cv2.LUT(hue, lut_hue), cv2.LUT(sat, lut_sat), cv2.LUT(val, lut_val)))
-        cv2.cvtColor(im_hsv, cv2.COLOR_HSV2BGR, dst=im)  # no return needed
+        im = cv2.cvtColor(im_hsv, cv2.COLOR_HSV2BGR)
+        if im.shape[2] > 3:
+            im = np.dstack((im_hsv, im[..., 3:]))  # no return needed
 
 
 def hist_equalize(im, clahe=True, bgr=False):
@@ -65,7 +67,10 @@ def hist_equalize(im, clahe=True, bgr=False):
         yuv[:, :, 0] = c.apply(yuv[:, :, 0])
     else:
         yuv[:, :, 0] = cv2.equalizeHist(yuv[:, :, 0])  # equalize Y channel histogram
-    return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR if bgr else cv2.COLOR_YUV2RGB)  # convert YUV image to RGB
+    im_rgb = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR if bgr else cv2.COLOR_YUV2RGB)  # convert YUV image to RGB
+    if im.shape[2] > 3:
+            im_rgb = np.dstack((im_rgb, im[..., 3:]))  # no return needed
+    return im_rgb
 
 
 def replicate(im, labels):
