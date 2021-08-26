@@ -69,7 +69,7 @@ def hist_equalize(im, clahe=True, bgr=False):
         yuv[:, :, 0] = cv2.equalizeHist(yuv[:, :, 0])  # equalize Y channel histogram
     im_rgb = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR if bgr else cv2.COLOR_YUV2RGB)  # convert YUV image to RGB
     if im.shape[2] > 3:
-            im_rgb = np.dstack((im_rgb, im[..., 3:]))  # no return needed
+        im_rgb = np.dstack((im_rgb, im[..., 3:]))  # no return needed
     return im_rgb
 
 

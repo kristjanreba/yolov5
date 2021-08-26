@@ -65,7 +65,7 @@ class Loggers():
 
     def on_pretrain_routine_end(self):
         # Callback runs on pre-train routine end
-        paths = self.save_dir.glob('*labels*.jpg')  # training labels
+        paths = self.save_dir.glob('*labels*.png')  # training labels
         if self.wandb:
             self.wandb.log({"Labels": [wandb.Image(str(x), caption=x.name) for x in paths]})
 
@@ -77,10 +77,10 @@ class Loggers():
                     warnings.simplefilter('ignore')  # suppress jit trace warning
                     self.tb.add_graph(torch.jit.trace(de_parallel(model), imgs[0:1], strict=False), [])
             if ni < 3:
-                f = self.save_dir / f'train_batch{ni}.jpg'  # filename
+                f = self.save_dir / f'train_batch{ni}.png'  # filename
                 Thread(target=plot_images, args=(imgs, targets, paths, f), daemon=True).start()
             if self.wandb and ni == 10:
-                files = sorted(self.save_dir.glob('train*.jpg'))
+                files = sorted(self.save_dir.glob('train*.png'))
                 self.wandb.log({'Mosaics': [wandb.Image(str(f), caption=f.name) for f in files if f.exists()]})
 
     def on_train_epoch_end(self, epoch):
@@ -96,7 +96,7 @@ class Loggers():
     def on_val_end(self):
         # Callback runs on val end
         if self.wandb:
-            files = sorted(self.save_dir.glob('val*.jpg'))
+            files = sorted(self.save_dir.glob('val*.png'))
             self.wandb.log({"Validation": [wandb.Image(str(f), caption=f.name) for f in files]})
 
     def on_fit_epoch_end(self, vals, epoch, best_fitness, fi):

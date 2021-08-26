@@ -137,7 +137,7 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
 
     tl = 3  # line thickness
     tf = max(tl - 1, 1)  # font thickness
-    bs, _, h, w = images.shape  # batch size, _, height, width
+    bs, ch, h, w = images.shape  # batch size, channels, height, width
     bs = min(bs, max_subplots)  # limit plot images
     ns = np.ceil(bs ** 0.5)  # number of subplots (square)
 
@@ -147,7 +147,7 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
         h = math.ceil(scale_factor * h)
         w = math.ceil(scale_factor * w)
 
-    mosaic = np.full((int(ns * h), int(ns * w), 3), 255, dtype=np.uint8)  # init
+    mosaic = np.full((int(ns * h), int(ns * w), ch), 255, dtype=np.uint8)  # init
     for i, img in enumerate(images):
         if i == max_subplots:  # if last batch has fewer images than we expect
             break
@@ -155,11 +155,23 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
         block_x = int(w * (i // ns))
         block_y = int(h * (i % ns))
 
+        # extract alpha channel if exists
+        alpha = None
+        if ch == 4:
+            alpha = img[0, :, :]
+            img = img[1:, :, :]
+
+        # transform into shape (h, w, d)
         img = img.transpose(1, 2, 0)
+
+        # reattach alpha channel
+        if alpha is not None:
+            img = np.dstack((img, alpha))
+
         if scale_factor < 1:
             img = cv2.resize(img, (w, h))
 
-        mosaic[block_y:block_y + h, block_x:block_x + w, :] = img[:, :, :3]
+        mosaic[block_y:block_y + h, block_x:block_x + w, :] = img
         if len(targets) > 0:
             image_targets = targets[targets[:, 0] == i]
             boxes = xywh2xyxy(image_targets[:, 2:6]).T
@@ -181,6 +193,7 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
                 cls = names[cls] if names else cls
                 if labels or conf[j] > 0.25:  # 0.25 conf thresh
                     label = '%s' % cls if labels else '%s %.1f' % (cls, conf[j])
+                    if ch == 4: color = color + (255,)  # add alpha channel
                     mosaic = plot_one_box(box, mosaic, label=label, color=color, line_width=tl)
 
         # Draw image filename labels
@@ -191,12 +204,13 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
                         lineType=cv2.LINE_AA)
 
         # Image border
-        cv2.rectangle(mosaic, (block_x, block_y), (block_x + w, block_y + h), (255, 255, 255), thickness=3)
-
+        color = (255,) * ch
+        cv2.rectangle(mosaic, (block_x, block_y), (block_x + w, block_y + h), color, thickness=3)
     if fname:
         r = min(1280. / max(h, w) / ns, 1.0)  # ratio to limit image size
         mosaic = cv2.resize(mosaic, (int(ns * w * r), int(ns * h * r)), interpolation=cv2.INTER_AREA)
-        # cv2.imwrite(fname, cv2.cvtColor(mosaic, cv2.COLOR_BGR2RGB))  # cv2 save
+        # cv2.imwrite(fname, cv2.cvtColor(mosaic, cv2.COLOR_BGRA2RGBA))  # cv2 save
+        mosaic = cv2.cvtColor(mosaic, cv2.COLOR_BGRA2RGBA)
         Image.fromarray(mosaic).save(fname)  # PIL save
     return mosaic
 
