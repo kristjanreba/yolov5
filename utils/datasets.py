@@ -645,7 +645,7 @@ def load_image(self, i):
             # this line should read each image as is and not remove channels
             im = cv2.imread(path, cv2.IMREAD_UNCHANGED)
             if im.shape[2] == 4: im = cv2.cvtColor(im, cv2.COLOR_RGBA2BGRA)
-            else: im = cv2.cvtColor(im, cv2.COLOR_RGB2BRG)
+            else: im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
             assert im is not None, 'Image Not Found ' + path
         h0, w0 = im.shape[:2]  # orig hw
         r = self.img_size / max(h0, w0)  # ratio
