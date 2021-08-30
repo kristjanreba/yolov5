@@ -113,6 +113,7 @@ def run(weights='./yolov5s.pt',  # weights path
         dynamic=False,  # ONNX: dynamic axes
         simplify=False,  # ONNX: simplify model
         opset=12,  # ONNX: opset version
+        ch=3  # number of channels
         ):
     t = time.time()
     include = [x.lower() for x in include]
@@ -128,7 +129,7 @@ def run(weights='./yolov5s.pt',  # weights path
     # Input
     gs = int(max(model.stride))  # grid size (max stride)
     img_size = [check_img_size(x, gs) for x in img_size]  # verify img_size are gs-multiples
-    img = torch.zeros(batch_size, 3, *img_size).to(device)  # image size(1,3,320,192) iDetection
+    img = torch.zeros(batch_size, 4, *img_size).to(device)  # image size(1,3,320,192) iDetection
 
     # Update model
     if half:
@@ -177,6 +178,7 @@ def parse_opt():
     parser.add_argument('--dynamic', action='store_true', help='ONNX: dynamic axes')
     parser.add_argument('--simplify', action='store_true', help='ONNX: simplify model')
     parser.add_argument('--opset', type=int, default=12, help='ONNX: opset version')
+    parser.add_argument('--ch', type=int, default=3, help='number of channels')
     opt = parser.parse_args()
     return opt
 
