@@ -129,7 +129,7 @@ def run(weights='./yolov5s.pt',  # weights path
     # Input
     gs = int(max(model.stride))  # grid size (max stride)
     img_size = [check_img_size(x, gs) for x in img_size]  # verify img_size are gs-multiples
-    img = torch.zeros(batch_size, 4, *img_size).to(device)  # image size(1,3,320,192) iDetection
+    img = torch.zeros(batch_size, ch, *img_size).to(device)  # image size(1,3,320,192) iDetection
 
     # Update model
     if half:
