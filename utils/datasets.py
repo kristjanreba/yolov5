@@ -214,6 +214,8 @@ class LoadImages:  # for inference
             # Read image
             self.count += 1
             img0 = cv2.imread(path, cv2.IMREAD_UNCHANGED)  # BGR or BGRA
+            if img0.shape[2] == 4: img0 = cv2.cvtColor(img0, cv2.COLOR_RGBA2BGRA)
+            else: img0 = cv2.cvtColor(img0, cv2.COLOR_RGB2BGR)
             assert img0 is not None, 'Image Not Found ' + path
             print(f'image {self.count}/{self.nf} {path}: ', end='')
 
